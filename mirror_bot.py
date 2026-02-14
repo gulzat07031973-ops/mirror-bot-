@@ -5,6 +5,7 @@ from aiogram import Bot, Dispatcher, types, F
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto
 from aiogram.filters import Command
 from aiogram.fsm.storage.memory import MemoryStorage
+from aiohttp import web
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO)
@@ -110,11 +111,6 @@ async def start_questions(callback: types.CallbackQuery):
         user_data[user_id] = {"answers": [], "current_question": 0}
     
     await ask_question(user_id, callback.message)
-
-@dp.callback_query(F.data.startswith("next_q_"))
-async def next_question(callback: types.CallbackQuery):
-    user_id = callback.from_user.id
-    await ask_question(user_id, callback.message)
     await callback.answer()
 
 async def ask_question(user_id: int, message: types.Message):
@@ -124,11 +120,9 @@ async def ask_question(user_id: int, message: types.Message):
     q_index = user_data[user_id]["current_question"]
     
     if q_index < len(questions):
-        # Отправляем вопрос без кнопок - ждем текстовый ответ
         await message.answer(questions[q_index])
         user_data[user_id]["awaiting_answer"] = True
     else:
-        # Все вопросы заданы - показываем результаты
         await show_results(user_id, message)
 
 # --- Обработка текстовых ответов ---
@@ -136,23 +130,18 @@ async def ask_question(user_id: int, message: types.Message):
 async def handle_answer(message: types.Message):
     user_id = message.from_user.id
     
-    # Проверяем, ждем ли мы ответ от этого пользователя
     if user_id in user_data and user_data[user_id].get("awaiting_answer", False):
-        # Сохраняем ответ
         user_data[user_id]["answers"].append(message.text)
         user_data[user_id]["current_question"] += 1
         user_data[user_id]["awaiting_answer"] = False
         
-        # Переходим к следующему вопросу
         await ask_question(user_id, message)
     else:
-        # Если не ждем ответ, предлагаем начать с /start
         await message.answer("Отправьте /start чтобы начать игру")
 
 async def show_results(user_id: int, message: types.Message):
     answers = user_data[user_id].get("answers", [])
     
-    # Формируем текст с ответами
     result_text = "📝 **Ваши ответы:**\n\n"
     for i, answer in enumerate(answers):
         if i < len(questions):
@@ -160,13 +149,11 @@ async def show_results(user_id: int, message: types.Message):
     
     await message.answer(result_text, parse_mode="Markdown")
     
-    # Финальное сообщение
     await message.answer(
         "✨ **Спасибо! Вы прошли демо!** ✨\n\n"
         "Если вы хотите полную физическую версию игры — напишите мне в WhatsApp"
     )
     
-    # Кнопка WhatsApp
     wa_kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(
             text="📱 Написать в WhatsApp",
@@ -175,8 +162,26 @@ async def show_results(user_id: int, message: types.Message):
     ])
     await message.answer("Заказать полную версию:", reply_markup=wa_kb)
 
+# --- Заглушка для порта ---
+async def health_check(request):
+    return web.Response(text="Bot is running")
+
+async def start_web_server():
+    app = web.Application()
+    app.router.add_get("/", health_check)
+    app.router.add_get("/health", health_check)
+    
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "0.0.0.0", 8080)
+    await site.start()
+    logging.info("Web server started on port 8080")
+
 async def main():
-    # Запуск бота
+    # Запускаем веб-сервер (заглушка для Render)
+    await start_web_server()
+    
+    # Запускаем бота
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
