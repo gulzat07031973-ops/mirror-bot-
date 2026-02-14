@@ -15,7 +15,7 @@ TOKEN = os.environ.get('BOT_TOKEN')
 if not TOKEN:
     raise ValueError("No BOT_TOKEN environment variable set")
 
-# --- КАРТИНКИ И ОПИСАНИЯ (НОВЫЕ РАБОЧИЕ ССЫЛКИ) ---
+# --- КАРТИНКИ И ОПИСАНИЯ (НОВЫЕ РАБОЧИЕ ССЫЛКИ IBB.CO) ---
 images = {
     "1": {
         "url": "https://i.ibb.co/4TQB6z7/ash.jpg",
