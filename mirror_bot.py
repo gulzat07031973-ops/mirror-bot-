@@ -2,7 +2,7 @@ import os
 import asyncio
 import logging
 from aiogram import Bot, Dispatcher, types, F
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto, FSInputFile
 from aiogram.filters import Command
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiohttp import web
@@ -15,22 +15,22 @@ TOKEN = os.environ.get('BOT_TOKEN')
 if not TOKEN:
     raise ValueError("No BOT_TOKEN environment variable set")
 
-# --- КАРТИНКИ (ПРОВЕРЕННЫЕ ССЫЛКИ IMGBB) ---
+# --- КАРТИНКИ ИЗ ЛОКАЛЬНОЙ ПАПКИ ---
 images = {
     "1": {
-        "url": "https://i.ibb.co/ZhT0q0L/ash.jpg",
+        "file": "images/ash.jpg",
         "desc": "🔥 Пепел от костра\n\nВсё, что могло гореть — сгорело. Остался пепел и тишина.\nЭто не слабость. Это знак: пора остановиться.\nДаже в пепле хранится тепло — дайте себе время, и оно снова станет огнём."
     },
     "2": {
-        "url": "https://i.ibb.co/cbF0Hgb/battery.jpg",
+        "file": "images/battery.jpg",
         "desc": "🔋 Пустая батарея\n\nРабота на пределе — и вот индикатор показывает ноль.\nОрганизм просит паузы, а сознание всё ещё ищет розетку, которой нет.\nПодзарядка начинается не с дел, а с разрешения — не делать."
     },
     "3": {
-        "url": "https://i.ibb.co/H7q7q7q/rock.jpg",
+        "file": "images/rock.jpg",
         "desc": "🪨 Скалы и трещины\n\nМожно долго держать напряжение. Но даже камень даёт трещины.\nОни не делают его слабее. Они просто говорят: «Дальше так нельзя».\nПора сбавить давление и найти другую опору."
     },
     "4": {
-        "url": "https://i.ibb.co/VLxgVyZ/sprout.jpg",
+        "file": "images/sprout.jpg",
         "desc": "🌱 Возрождение ростка\n\nУсталость не навсегда.\nДаже когда кажется, что всё кончено — внутри уже пробивается жизнь.\nСначала робко. Потом смелее.\nВсё большое начинается с малого."
     }
 }
@@ -65,10 +65,10 @@ async def start(message: types.Message):
     # Небольшая пауза
     await asyncio.sleep(0.5)
     
-    # Создаем медиа-группу с картинками
+    # Создаем медиа-группу с картинками из локальных файлов
     media_group = []
     for k, v in images.items():
-        media_group.append(InputMediaPhoto(media=v["url"]))
+        media_group.append(InputMediaPhoto(media=FSInputFile(v["file"])))
     
     # Отправляем все картинки одной группой
     await message.answer_media_group(media_group)
