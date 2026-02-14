@@ -4,7 +4,7 @@ WORKDIR /app
 
 # Копируем файлы
 COPY requirements.txt .
-COPY bot.py .
+COPY mirror_bot.py bot.py
 
 # Устанавливаем зависимости
 RUN pip install --no-cache-dir -r requirements.txt
