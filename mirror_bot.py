@@ -1,12 +1,18 @@
-from aiogram import Bot, Dispatcher, types
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto
-from aiogram.utils import executor
 import os
+import asyncio
+import logging
+from aiogram import Bot, Dispatcher, types, F
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto
+from aiogram.filters import Command
+from aiogram.fsm.storage.memory import MemoryStorage
+
+# Настройка логирования
+logging.basicConfig(level=logging.INFO)
 
 # --- Токен бота из переменной окружения ---
-TOKEN = os.getenv("TELEGRAM_TOKEN")
-bot = Bot(token=TOKEN)
-dp = Dispatcher(bot)
+TOKEN = os.environ.get('BOT_TOKEN')
+if not TOKEN:
+    raise ValueError("No BOT_TOKEN environment variable set")
 
 # --- Картинки и описания ---
 images = {
@@ -40,78 +46,138 @@ questions = [
 # --- Хранилище ответов пользователей ---
 user_data = {}
 
+# --- Инициализация бота ---
+bot = Bot(token=TOKEN)
+storage = MemoryStorage()
+dp = Dispatcher(storage=storage)
+
 # --- Команда /start ---
-@dp.message_handler(commands=['start'])
+@dp.message(Command("start"))
 async def start(message: types.Message):
-    # Приветствие
     await message.answer(
         "🔥 Добро пожаловать в демо-версию нейроигры «Зеркало»! 🔥\n\n"
         "Эта мини-игра поможет вам взглянуть на своё состояние через 4 образа и 5 вопросов.\n"
         "Выберите один образ, который откликается вам больше всего:"
     )
 
-    # Кнопки под картинками
-    kb = InlineKeyboardMarkup(row_width=2)
+    # Создаем кнопки для каждой картинки
+    buttons = []
     for k in images:
-        kb.insert(InlineKeyboardButton(f"{k}️⃣", callback_data=f"img_{k}"))
+        buttons.append(InlineKeyboardButton(text=f"{k}️⃣", callback_data=f"img_{k}"))
+    
+    # Разбиваем на ряды по 2 кнопки
+    keyboard = []
+    for i in range(0, len(buttons), 2):
+        keyboard.append(buttons[i:i+2])
+    
+    kb = InlineKeyboardMarkup(inline_keyboard=keyboard)
 
-    # Отправляем сразу все 4 картинки как медиа-группу
-    media = [InputMediaPhoto(images[k]["url"]) for k in images]
-    await bot.send_media_group(message.chat.id, media)
+    # Отправляем все картинки
+    media_group = []
+    for k in images:
+        media_group.append(InputMediaPhoto(media=images[k]["url"]))
+    
+    await message.answer_media_group(media_group)
     await message.answer("Нажмите кнопку под понравившейся картинкой:", reply_markup=kb)
 
-
 # --- Выбор картинки ---
-@dp.callback_query_handler(lambda c: c.data.startswith("img_"))
+@dp.callback_query(F.data.startswith("img_"))
 async def on_image(callback: types.CallbackQuery):
-    uid = callback.from_user.id
+    user_id = callback.from_user.id
     idx = callback.data.split("_")[1]
-    user_data[uid] = {"chosen": idx, "answers": []}
+    
+    user_data[user_id] = {
+        "chosen": idx, 
+        "answers": [],
+        "current_question": 0
+    }
 
-    # Отправляем описание выбранного образа
-    await bot.send_message(uid, images[idx]["desc"])
+    await callback.message.answer(images[idx]["desc"])
 
-    # Кнопка "Далее" к вопросам
-    next_kb = InlineKeyboardMarkup().add(
-        InlineKeyboardButton("➡️ Далее", callback_data="q_0")
-    )
-    await bot.send_message(uid, "Нажмите «Далее», чтобы начать вопросы.", reply_markup=next_kb)
+    # Кнопка для начала вопросов
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="➡️ Начать вопросы", callback_data="start_questions")]
+    ])
+    await callback.message.answer("Готовы отвечать на вопросы?", reply_markup=kb)
+    await callback.answer()
 
+# --- Начало вопросов ---
+@dp.callback_query(F.data == "start_questions")
+async def start_questions(callback: types.CallbackQuery):
+    user_id = callback.from_user.id
+    
+    if user_id not in user_data:
+        user_data[user_id] = {"answers": [], "current_question": 0}
+    
+    await ask_question(user_id, callback.message)
 
-# --- Вопросы по шагам ---
-@dp.callback_query_handler(lambda c: c.data.startswith("q_"))
-async def on_question(callback: types.CallbackQuery):
-    uid = callback.from_user.id
-    i = int(callback.data.split("_")[1])
+@dp.callback_query(F.data.startswith("next_q_"))
+async def next_question(callback: types.CallbackQuery):
+    user_id = callback.from_user.id
+    await ask_question(user_id, callback.message)
+    await callback.answer()
 
-    # Сохраняем предыдущий ответ
-    if i > 0 and callback.message.text:
-        user_data[uid]["answers"].append(callback.message.text)
-
-    if i < len(questions):
-        kb = InlineKeyboardMarkup().add(
-            InlineKeyboardButton("➡️ Далее", callback_data=f"q_{i+1}")
-        )
-        await bot.send_message(uid, questions[i], reply_markup=kb)
+async def ask_question(user_id: int, message: types.Message):
+    if user_id not in user_data:
+        user_data[user_id] = {"answers": [], "current_question": 0}
+    
+    q_index = user_data[user_id]["current_question"]
+    
+    if q_index < len(questions):
+        # Отправляем вопрос без кнопок - ждем текстовый ответ
+        await message.answer(questions[q_index])
+        user_data[user_id]["awaiting_answer"] = True
     else:
-        # Сначала показываем ответы пользователя
-        await bot.send_message(uid, f"Ваши ответы:\n{user_data[uid]['answers']}")
+        # Все вопросы заданы - показываем результаты
+        await show_results(user_id, message)
 
-        # Финальная часть — завершающая фраза + кнопка купить
-        await bot.send_message(uid,
-            "✨ Спасибо! Вы прошли демо. ✨\n\n"
-            "Если вы хотите полную физическую версию игры — нажмите кнопку ниже."
-        )
+# --- Обработка текстовых ответов ---
+@dp.message()
+async def handle_answer(message: types.Message):
+    user_id = message.from_user.id
+    
+    # Проверяем, ждем ли мы ответ от этого пользователя
+    if user_id in user_data and user_data[user_id].get("awaiting_answer", False):
+        # Сохраняем ответ
+        user_data[user_id]["answers"].append(message.text)
+        user_data[user_id]["current_question"] += 1
+        user_data[user_id]["awaiting_answer"] = False
+        
+        # Переходим к следующему вопросу
+        await ask_question(user_id, message)
+    else:
+        # Если не ждем ответ, предлагаем начать с /start
+        await message.answer("Отправьте /start чтобы начать игру")
 
-        # WhatsApp кнопка для заказа
-        wa_kb = InlineKeyboardMarkup().add(
-            InlineKeyboardButton(
-                "🛒 Купить полную версию",
-                url="https://wa.me/77079898845?text=Я%20хочу%20купить%20игру%20«Зеркало»"
-            )
-        )
-        await bot.send_message(uid, "Заказать через WhatsApp:", reply_markup=wa_kb)
+async def show_results(user_id: int, message: types.Message):
+    answers = user_data[user_id].get("answers", [])
+    
+    # Формируем текст с ответами
+    result_text = "📝 **Ваши ответы:**\n\n"
+    for i, answer in enumerate(answers):
+        if i < len(questions):
+            result_text += f"*{questions[i]}*\n_{answer}_\n\n"
+    
+    await message.answer(result_text, parse_mode="Markdown")
+    
+    # Финальное сообщение
+    await message.answer(
+        "✨ **Спасибо! Вы прошли демо!** ✨\n\n"
+        "Если вы хотите полную физическую версию игры — напишите мне в WhatsApp"
+    )
+    
+    # Кнопка WhatsApp
+    wa_kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(
+            text="📱 Написать в WhatsApp",
+            url="https://wa.me/77079898845?text=Я%20хочу%20купить%20игру%20«Зеркало»"
+        )]
+    ])
+    await message.answer("Заказать полную версию:", reply_markup=wa_kb)
 
+async def main():
+    # Запуск бота
+    await dp.start_polling(bot)
 
-if _name_ == "_main_":
-    executor.start_polling(dp, skip_updates=True)
+if __name__ == "__main__":
+    asyncio.run(main())
